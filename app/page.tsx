@@ -1,9 +1,27 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+interface FormData {
+  name: string;
+  age: string;
+  email: string;
+  gender: string;
+  interests: string;
+  postcode: string;
+  livingSituation: string;
+  occupation: string;
+  mood: string;
+  groupSize: string;
+  timeOfDay: string;
+  budget: string;
+  activityLevel: string;
+}
 
 export default function Home() {
-  const [formData, setFormData] = useState({
+  const router = useRouter();
+  const [formData, setFormData] = useState<FormData>({
     name: '',
     age: '',
     email: '',
@@ -12,44 +30,60 @@ export default function Home() {
     postcode: '',
     livingSituation: '',
     occupation: '',
+    mood: '',
+    groupSize: '',
+    timeOfDay: '',
+    budget: '',
+    activityLevel: '',
   });
 
-  const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Form submitted:', formData);
-    setSubmitted(true);
-    // TODO: Send data to API for processing
-  };
+    setLoading(true);
+    setError('');
 
-  if (submitted) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">Thank You!</h2>
-          <p className="text-gray-600 mb-4">Your information has been submitted successfully.</p>
-          <p className="text-sm text-gray-500">Our AI agent will now search for community events and activities based on your preferences.</p>
-          <button
-            onClick={() => setSubmitted(false)}
-            className="mt-6 px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-          >
-            Submit Another Response
-          </button>
-        </div>
-      </div>
-    );
-  }
+    try {
+      const response = await fetch('/api/recommendations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...formData,
+          preferences: {
+            groupSize: formData.groupSize || undefined,
+            timeOfDay: formData.timeOfDay || undefined,
+            budget: formData.budget || undefined,
+            activityLevel: formData.activityLevel || undefined,
+          },
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to get recommendations');
+      }
+
+      // Store recommendations in session storage
+      sessionStorage.setItem('recommendations', JSON.stringify(data));
+      
+      // Navigate to recommendations page
+      router.push('/recommendations');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4">
@@ -58,7 +92,7 @@ export default function Home() {
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-800 mb-2">Social Connect</h1>
           <p className="text-gray-600 text-lg">Find Your Community</p>
-          <p className="text-gray-500 mt-2">We help you discover local events and activities based on your interests and mood.</p>
+          <p className="text-gray-500 mt-2">Our AI agent will search for community events and activities based on your interests and mood.</p>
         </div>
 
         {/* Form */}
@@ -213,12 +247,126 @@ export default function Home() {
               />
             </div>
 
+            {/* Mood */}
+            <div>
+              <label htmlFor="mood" className="block text-sm font-medium text-gray-700 mb-1">
+                How are you feeling today? (Optional)
+              </label>
+              <select
+                id="mood"
+                name="mood"
+                value={formData.mood}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+              >
+                <option value="">Select your mood</option>
+                <option value="happy">Happy</option>
+                <option value="relaxed">Relaxed</option>
+                <option value="energetic">Energetic</option>
+                <option value="social">Social</option>
+                <option value="curious">Curious</option>
+                <option value="adventurous">Adventurous</option>
+              </select>
+            </div>
+
+            {/* Preferences Section */}
+            <div className="border-t pt-6">
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">Additional Preferences (Optional)</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Group Size */}
+                <div>
+                  <label htmlFor="groupSize" className="block text-sm font-medium text-gray-700 mb-1">
+                    Preferred Group Size
+                  </label>
+                  <select
+                    id="groupSize"
+                    name="groupSize"
+                    value={formData.groupSize}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                  >
+                    <option value="">No preference</option>
+                    <option value="small">Small (under 30 people)</option>
+                    <option value="medium">Medium (30-100 people)</option>
+                    <option value="large">Large (100+ people)</option>
+                  </select>
+                </div>
+
+                {/* Time of Day */}
+                <div>
+                  <label htmlFor="timeOfDay" className="block text-sm font-medium text-gray-700 mb-1">
+                    Preferred Time
+                  </label>
+                  <select
+                    id="timeOfDay"
+                    name="timeOfDay"
+                    value={formData.timeOfDay}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                  >
+                    <option value="">No preference</option>
+                    <option value="morning">Morning</option>
+                    <option value="afternoon">Afternoon</option>
+                    <option value="evening">Evening</option>
+                  </select>
+                </div>
+
+                {/* Budget */}
+                <div>
+                  <label htmlFor="budget" className="block text-sm font-medium text-gray-700 mb-1">
+                    Budget
+                  </label>
+                  <select
+                    id="budget"
+                    name="budget"
+                    value={formData.budget}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                  >
+                    <option value="">No preference</option>
+                    <option value="free">Free events only</option>
+                    <option value="low">Low (under £20)</option>
+                    <option value="medium">Medium (£20-£50)</option>
+                    <option value="high">High (£50+)</option>
+                  </select>
+                </div>
+
+                {/* Activity Level */}
+                <div>
+                  <label htmlFor="activityLevel" className="block text-sm font-medium text-gray-700 mb-1">
+                    Activity Level
+                  </label>
+                  <select
+                    id="activityLevel"
+                    name="activityLevel"
+                    value={formData.activityLevel}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                  >
+                    <option value="">No preference</option>
+                    <option value="relaxed">Relaxed</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="active">Active</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Error Message */}
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+                {error}
+              </div>
+            )}
+
             {/* Submit Button */}
             <button
               type="submit"
-              className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors shadow-md hover:shadow-lg"
+              disabled={loading}
+              className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Find Activities for Me
+              {loading ? 'Finding Activities...' : 'Find Activities for Me'}
             </button>
           </form>
         </div>
