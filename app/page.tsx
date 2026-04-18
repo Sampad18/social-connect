@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { profileManager } from '@/lib/profileManager';
 
 interface FormData {
   name: string;
@@ -39,6 +40,13 @@ export default function Home() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [savedProfiles, setSavedProfiles] = useState<any[]>([]);
+
+  // Load saved profiles on mount
+  useEffect(() => {
+    const profiles = profileManager.getAllProfiles();
+    setSavedProfiles(profiles);
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -51,20 +59,40 @@ export default function Home() {
     setError('');
 
     try {
+      // Parse interests from comma-separated string to array
+      const interests = typeof formData.interests === 'string' 
+        ? formData.interests.split(',').map((i: string) => i.trim()).filter((i: string) => i)
+        : formData.interests;
+
+      const userProfile = {
+        name: formData.name,
+        age: parseInt(formData.age),
+        email: formData.email,
+        gender: formData.gender,
+        interests,
+        postcode: formData.postcode,
+        livingSituation: formData.livingSituation,
+        occupation: formData.occupation,
+        mood: formData.mood || undefined,
+        preferences: {
+          groupSize: formData.groupSize as any || undefined,
+          timeOfDay: formData.timeOfDay as any || undefined,
+          budget: formData.budget as any || undefined,
+          activityLevel: formData.activityLevel as any || undefined,
+        },
+      };
+
+      // Save profile to localStorage
+      profileManager.saveProfile(userProfile);
+      profileManager.setCurrentProfile(userProfile);
+
+      // Get recommendations
       const response = await fetch('/api/recommendations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          ...formData,
-          preferences: {
-            groupSize: formData.groupSize || undefined,
-            timeOfDay: formData.timeOfDay || undefined,
-            budget: formData.budget || undefined,
-            activityLevel: formData.activityLevel || undefined,
-          },
-        }),
+        body: JSON.stringify(userProfile),
       });
 
       const data = await response.json();
@@ -85,6 +113,35 @@ export default function Home() {
     }
   };
 
+  const loadProfile = (email: string) => {
+    const profile = profileManager.getProfileByEmail(email);
+    if (profile) {
+      setFormData({
+        name: profile.name,
+        age: profile.age.toString(),
+        email: profile.email,
+        gender: profile.gender,
+        interests: profile.interests.join(', '),
+        postcode: profile.postcode,
+        livingSituation: profile.livingSituation,
+        occupation: profile.occupation,
+        mood: profile.mood || '',
+        groupSize: profile.preferences?.groupSize || '',
+        timeOfDay: profile.preferences?.timeOfDay || '',
+        budget: profile.preferences?.budget || '',
+        activityLevel: profile.preferences?.activityLevel || '',
+      });
+    }
+  };
+
+  const deleteProfile = (email: string) => {
+    if (confirm('Are you sure you want to delete this profile?')) {
+      profileManager.deleteProfile(email);
+      const profiles = profileManager.getAllProfiles();
+      setSavedProfiles(profiles);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4">
       <div className="max-w-2xl mx-auto">
@@ -94,6 +151,37 @@ export default function Home() {
           <p className="text-gray-600 text-lg">Find Your Community</p>
           <p className="text-gray-500 mt-2">Our AI agent will search for community events and activities based on your interests and mood.</p>
         </div>
+
+        {/* Saved Profiles */}
+        {savedProfiles.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Saved Profiles</h3>
+            <div className="space-y-3">
+              {savedProfiles.map((profile, index) => (
+                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-800">{profile.name}</p>
+                    <p className="text-sm text-gray-600">{profile.email}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => loadProfile(profile.email)}
+                      className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
+                    >
+                      Load
+                    </button>
+                    <button
+                      onClick={() => deleteProfile(profile.email)}
+                      className="px-3 py-1 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Form */}
         <div className="bg-white rounded-2xl shadow-xl p-8">
